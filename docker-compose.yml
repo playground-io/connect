@@ -1,0 +1,94 @@
+version: "3"
+services:
+
+  #PREPARE INIT DB
+  init_db:
+    image: "guacamole/guacamole"
+    container_name: "init_db"
+    command: >
+        sh -c "/opt/guacamole/bin/initdb.sh --mysql > /tmp/init_db/initdb.sql &&
+               sed -i \"s/guacadmin/admin/gi\" /tmp/init_db/initdb.sql &&
+               sed -i \"s/CA458A7D494E3BE824F5E1E175A1556C0F8EEF2C2D7DF3633BEC4A29C4411960/0B50488F8595574F59A6AE523548A16786CDA9C23AA62AC10E410548F11EF7FF/gi\" /tmp/init_db/initdb.sql &&
+               sed -i \"s/FE24ADC5E11E2B25288D1704ABE67A79E342ECC26064CE69C5B3177795A82264/74A3F4607398A2C1EEB3E432F5F62CA80AF8902D2583E37DEBADA6BD8C3227F8/gi\" /tmp/init_db/initdb.sql"
+    volumes:
+      - "initvolume:/tmp/init_db/"
+    networks:
+      - frontend
+
+  #MYSQL DATABASE
+  db:
+    image: "mysql"
+    container_name: "db"
+    depends_on:
+      - "init_db"
+    volumes:
+      - "dbvolume:/var/lib/mysql"
+      - "initvolume:/docker-entrypoint-initdb.d/"
+    environment:
+      MYSQL_ROOT_USER: "root"
+      MYSQL_ROOT_PASSWORD: "sqlpassword"
+      MYSQL_DATABASE: "guacamole"
+      MYSQL_USER: "guacamole"
+      MYSQL_PASSWORD: "guacpassword"
+    restart: unless-stopped
+    networks:
+      - "frontend"
+
+  #APP PROXY
+  app-proxy:
+    image: "guacamole/guacd"
+    container_name: "backend"
+    restart: unless-stopped
+    networks:
+      - "frontend"
+
+  #APP FRONTEND
+  application:
+    image: "guacamole/guacamole"
+    container_name: "frontend"
+    depends_on:
+      - "db"
+      - "app-proxy"
+    volumes:
+      - "./extensions:/tmp/guacamole"
+    environment:
+      GUACAMOLE_HOME: "/tmp/guacamole"
+      GUACD_HOSTNAME: "backend"
+      MYSQL_HOSTNAME: "db"
+      MYSQL_DATABASE: "guacamole"
+      MYSQL_USER: "guacamole"
+      MYSQL_PASSWORD: "guacpassword"
+      LDAP_HOSTNAME: "10.255.50.11"
+      LDAP_PORT: "389"
+      LDAP_USER_BASE_DN: "OU=Accounts,OU=OneIT,DC=oneit,DC=local"
+      LDAP_USERNAME_ATTRIBUTE: "sAMAccountName"
+      LDAP_SEARCH_BIND_DN: "CN=LdapUser,OU=SvcAccounts,OU=OneIT,DC=oneit,DC=local"
+      LDAP_SEARCH_BIND_PASSWORD: "Passw0rd_"
+      LDAP_GROUP_BASE_DN: "OU=Groups,OU=OneIT,DC=oneit,DC=local"
+      LDAP_GROUP_NAME_ATTRIBUTE: "cn"
+    restart: unless-stopped
+    networks:
+      - "frontend"
+
+  #WEB PROXY
+  web-proxy:
+    image: nginx:alpine
+    container_name: proxy
+    depends_on:
+      - application
+    volumes:
+      - ./proxy:/etc/nginx
+      - ./certs:/etc/ssl/private
+    ports:
+      - 80:80
+      - 443:443
+    restart: unless-stopped
+    networks:
+      - frontend
+
+volumes:
+  dbvolume: {}
+  initvolume: {}
+
+networks:
+  frontend: {}
